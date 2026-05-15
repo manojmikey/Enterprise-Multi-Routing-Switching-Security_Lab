@@ -418,85 +418,237 @@ ping 10.10.10.2 source 10.10.10.1       ← Ping far-end tunnel IP
 
 ---
 
-STEP 7 — Configure IPsec VPN
-The GRE tunnel carries traffic but doesn't encrypt it. IPsec adds encryption and integrity. Together, GRE+IPsec is the standard enterprise site-to-site VPN.
+## STEP 7 — Configure GRE over IPsec VPN
 
-IPsec negotiates in two phases:
+The GRE tunnel provides connectivity between the headquarters and branch routers, but GRE traffic itself is not encrypted.
+To secure the tunnel, IPsec was implemented to provide:
 
-Phase 1 (ISAKMP): Secure management channel, authenticates peers
-Phase 2 (IPsec SA): Negotiates actual data encryption parameters
-Step 7a — ISAKMP Policy (Phase 1) on R1 and R2
+* Encryption
+* Authentication
+* Integrity
+* Secure site-to-site communication
+
+This implementation uses **GRE over IPsec using Tunnel Protection**, which is a cleaner and more modern approach compared to using crypto maps directly on physical interfaces.
+
+In this setup:
+
+* **GRE handles routing and multicast traffic**
+* **IPsec secures the GRE packets**
+
+---
+
+## STEP 7a — Configure ISAKMP Policy (Phase 1)
+
+ISAKMP Phase 1 establishes a secure management channel between VPN peers before actual encrypted traffic is exchanged.
+
+### Configuration on R1 and R2
+
+```bash
 configure terminal
 
 crypto isakmp policy 10
  encryption aes 256
  hash sha256
  authentication pre-share
- group 2
+ group 14
 
 end
-Same command on both R1 and R2 — both sides must match exactly.
+```
 
-Step 7b — Pre-Shared Keys
-! On R1:
+### Explanation
+
+* `encryption aes 256`
+  → Uses AES-256 encryption for strong confidentiality
+
+* `hash sha256`
+  → Provides integrity checking using SHA-256
+
+* `authentication pre-share`
+  → Uses a shared password/key between peers
+
+* `group 14`
+  → Uses Diffie-Hellman Group 14 for secure key exchange
+
+> Both routers must have identical ISAKMP policy settings, otherwise Phase 1 negotiation will fail.
+
+---
+
+## STEP 7b — Configure Pre-Shared Keys
+
+A shared secret key is configured on both routers for peer authentication.
+
+### On R1
+
+```bash
 configure terminal
-crypto isakmp key cisco address 192.168.12.2
+
+crypto isakmp key VPNkey123 address 10.10.10.2
+
 end
+```
 
-! On R2:
+### On R2
+
+```bash
 configure terminal
-crypto isakmp key cisco address 192.168.12.1
+
+crypto isakmp key VPNkey123 address 10.10.10.1
+
 end
-The key cisco must be identical on both sides. The address is the peer's physical IP.
+```
 
-Step 7c — Transform Set (Phase 2 Algorithms)
-! On both R1 and R2:
+### Explanation
+
+* `VPNkey123`
+  → Shared authentication key
+
+* `address`
+  → Specifies the remote VPN peer IP address
+
+> The key must match exactly on both routers.
+
+---
+
+## STEP 7c — Configure IPsec Transform Set (Phase 2)
+
+Phase 2 defines how actual user data will be encrypted and protected.
+
+### Configuration on Both Routers
+
+```bash
 configure terminal
-crypto ipsec transform-set VPN esp-aes esp-sha-hmac
+
+crypto ipsec transform-set VPN-SET esp-aes 256 esp-sha256-hmac
  mode transport
+
 end
-mode transport is used because GRE already provides the outer IP header. IPsec in transport mode only encrypts the GRE payload — more efficient than tunnel mode here.
+```
 
-Step 7d — ACL (Define What Traffic to Encrypt)
-! On R1:
-access-list 100 permit gre host 192.168.12.1 host 192.168.12.2
+### Explanation
 
-! On R2:
-access-list 100 permit gre host 192.168.12.2 host 192.168.12.1
-This ACL says: encrypt all GRE traffic between R1 and R2's physical IPs.
+* `esp-aes 256`
+  → Encrypts data using AES-256
 
-Step 7e — Crypto Map
-! On R1:
+* `esp-sha256-hmac`
+  → Provides integrity and authentication for packets
+
+* `mode transport`
+  → Encrypts only the payload while preserving the original IP header
+
+Transport mode is commonly used with GRE because GRE already creates an additional encapsulation header.
+
+---
+
+## STEP 7d — Configure IPsec Profile
+
+Instead of applying a crypto map to a physical interface, this setup uses an IPsec profile attached directly to the GRE tunnel.
+
+### Configuration on Both Routers
+
+```bash
 configure terminal
 
-crypto map CMAP 10 ipsec-isakmp
- set peer 192.168.12.2
- set transform-set VPN
- match address 100
-
-interface g3/0
- crypto map CMAP
+crypto ipsec profile VPN-PROFILE
+ set transform-set VPN-SET
 
 end
+```
 
-! On R2:
+### Explanation
+
+The IPsec profile binds the transform set to the tunnel interface and simplifies GRE over IPsec deployment.
+
+---
+
+## STEP 7e — Apply Tunnel Protection
+
+The IPsec profile is applied directly to the GRE tunnel interface.
+
+### Configuration on Both Routers
+
+```bash
 configure terminal
 
-crypto map CMAP 10 ipsec-isakmp
- set peer 192.168.12.1
- set transform-set VPN
- match address 100
-
-interface g2/0
- crypto map CMAP
+interface tunnel 10
+ tunnel protection ipsec profile VPN-PROFILE
 
 end
-Critical: The crypto map must be applied to the physical interface (G3/0 on R1, G2/0 on R2), not the tunnel interface. GRE packets exit via the physical interface, and that's where IPsec intercepts and encrypts them.
+```
 
-Verification
-show crypto isakmp sa       ← Should show QM_IDLE (Phase 1 up and healthy)
-show crypto ipsec sa        ← Check 'encaps' and 'decaps' counters are increasing
-show crypto map             ← View crypto map config and interface assignment
+### Explanation
+
+This command tells the router to:
+
+* Encrypt all GRE traffic passing through Tunnel10
+* Automatically secure packets using the IPsec profile
+
+This method is preferred in modern enterprise deployments because it is:
+
+* Cleaner
+* Easier to manage
+* More scalable than crypto maps
+
+---
+
+## Verification Commands
+
+### Verify ISAKMP Phase 1
+
+```bash
+show crypto isakmp sa
+```
+
+Expected state:
+
+```bash
+QM_IDLE
+```
+
+This means the VPN negotiation succeeded.
+
+---
+
+### Verify IPsec Packet Encryption
+
+```bash
+show crypto ipsec sa
+```
+
+Check:
+
+* `encaps`
+* `decaps`
+
+Counters should increase when traffic passes through the tunnel.
+
+---
+
+### Verify Tunnel Status
+
+```bash
+show interface tunnel 10
+```
+
+Tunnel should show:
+
+```bash
+Tunnel10 is up, line protocol is up
+```
+
+---
+
+## Key Learning From This Configuration
+
+This implementation demonstrates a real enterprise VPN deployment model using:
+
+* GRE for routing flexibility
+* IPsec for security
+* SHA-256 integrity protection
+* AES-256 encryption
+* Tunnel Protection profiles
+
+This approach is widely used in enterprise WAN and branch connectivity environments.
+
 
 
 ## STEP 8 — Configure VLANs
