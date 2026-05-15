@@ -418,17 +418,14 @@ ping 10.10.10.2 source 10.10.10.1       ← Ping far-end tunnel IP
 
 ---
 
-## STEP 7 — Configure IPsec VPN
-
+STEP 7 — Configure IPsec VPN
 The GRE tunnel carries traffic but doesn't encrypt it. IPsec adds encryption and integrity. Together, GRE+IPsec is the standard enterprise site-to-site VPN.
 
-IPsec negotiates in **two phases**:
-- **Phase 1 (ISAKMP):** Secure management channel, authenticates peers
-- **Phase 2 (IPsec SA):** Negotiates actual data encryption parameters
+IPsec negotiates in two phases:
 
-### Step 7a — ISAKMP Policy (Phase 1) on R1 and R2
-
-```
+Phase 1 (ISAKMP): Secure management channel, authenticates peers
+Phase 2 (IPsec SA): Negotiates actual data encryption parameters
+Step 7a — ISAKMP Policy (Phase 1) on R1 and R2
 configure terminal
 
 crypto isakmp policy 10
@@ -438,13 +435,9 @@ crypto isakmp policy 10
  group 2
 
 end
-```
+Same command on both R1 and R2 — both sides must match exactly.
 
-Same command on **both R1 and R2** — both sides must match exactly.
-
-### Step 7b — Pre-Shared Keys
-
-```
+Step 7b — Pre-Shared Keys
 ! On R1:
 configure terminal
 crypto isakmp key cisco address 192.168.12.2
@@ -454,37 +447,25 @@ end
 configure terminal
 crypto isakmp key cisco address 192.168.12.1
 end
-```
+The key cisco must be identical on both sides. The address is the peer's physical IP.
 
-The key `cisco` must be identical on both sides. The address is the **peer's physical IP**.
-
-### Step 7c — Transform Set (Phase 2 Algorithms)
-
-```
+Step 7c — Transform Set (Phase 2 Algorithms)
 ! On both R1 and R2:
 configure terminal
 crypto ipsec transform-set VPN esp-aes esp-sha-hmac
  mode transport
 end
-```
+mode transport is used because GRE already provides the outer IP header. IPsec in transport mode only encrypts the GRE payload — more efficient than tunnel mode here.
 
-`mode transport` is used because GRE already provides the outer IP header. IPsec in transport mode only encrypts the GRE payload — more efficient than tunnel mode here.
-
-### Step 7d — ACL (Define What Traffic to Encrypt)
-
-```
+Step 7d — ACL (Define What Traffic to Encrypt)
 ! On R1:
 access-list 100 permit gre host 192.168.12.1 host 192.168.12.2
 
 ! On R2:
 access-list 100 permit gre host 192.168.12.2 host 192.168.12.1
-```
-
 This ACL says: encrypt all GRE traffic between R1 and R2's physical IPs.
 
-### Step 7e — Crypto Map
-
-```
+Step 7e — Crypto Map
 ! On R1:
 configure terminal
 
@@ -510,19 +491,13 @@ interface g2/0
  crypto map CMAP
 
 end
-```
+Critical: The crypto map must be applied to the physical interface (G3/0 on R1, G2/0 on R2), not the tunnel interface. GRE packets exit via the physical interface, and that's where IPsec intercepts and encrypts them.
 
-> **Critical:** The crypto map must be applied to the **physical interface** (G3/0 on R1, G2/0 on R2), not the tunnel interface. GRE packets exit via the physical interface, and that's where IPsec intercepts and encrypts them.
-
-### Verification
-
-```
+Verification
 show crypto isakmp sa       ← Should show QM_IDLE (Phase 1 up and healthy)
 show crypto ipsec sa        ← Check 'encaps' and 'decaps' counters are increasing
 show crypto map             ← View crypto map config and interface assignment
-```
 
----
 
 ## STEP 8 — Configure VLANs
 
