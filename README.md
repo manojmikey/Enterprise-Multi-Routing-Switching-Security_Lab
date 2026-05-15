@@ -2,7 +2,7 @@
 Enterprise Network Security &amp; Routing Lab implementing OSPF, iBGP/eBGP, GRE over IPsec VPN, VLANs, SVIs, HSRP, DHCP, Layer 3 Switching, and route redistribution with real-world troubleshooting scenarios and verification commands.
 
 
-# WALKTHROUGH — Enterprise Network Lab: Complete Step-by-Step Build
+# Enterprise Network Lab: Complete Step-by-Step Build
 
 This document covers the complete configuration of the Enterprise Network Lab from scratch — every command, every protocol, every issue hit along the way, and how it was resolved.
 
